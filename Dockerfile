@@ -1,21 +1,26 @@
-FROM python:3.8-slim as base
+FROM python:3.8-slim-bookworm AS production
 
-# Any python libraries that require system libraries to be installed will likely
-# need the following packages in order to build
-RUN apt-get update && \
-    apt-get -y upgrade && \
-    apt-get install -y build-essential git && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+# several pinned deps have no cp38 wheel and compile from source
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
 
-ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
-
-FROM base as builder
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY . /app
+COPY stac_fastapi /app/stac_fastapi
+COPY stac-fastapi-sqlalchemy /app/stac-fastapi-sqlalchemy
 
-RUN python -m pip install -e ./stac_fastapi/types[dev] && \
-    python -m pip install -e ./stac_fastapi/api[dev] && \
-    python -m pip install -e ./stac_fastapi/extensions[dev]
+# one pip invocation so the resolver cannot swap pypi stac-fastapi.* dists in over these
+RUN pip install --no-cache-dir \
+    -e ./stac_fastapi/types \
+    -e ./stac_fastapi/api[oidc] \
+    -e ./stac_fastapi/extensions \
+    -e ./stac-fastapi-sqlalchemy[server]
+
+EXPOSE 8081
+
+CMD ["python", "-m", "uvicorn", "stac_fastapi.sqlalchemy.app:app", "--proxy-headers", "--host", "0.0.0.0", "--port", "8081", "--timeout-keep-alive", "65"]

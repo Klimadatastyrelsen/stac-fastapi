@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "skraafoto-stac.fullname" . }}
+  labels:
+    {{- include "skraafoto-stac.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "skraafoto-stac.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "skraafoto-stac.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: stac-api
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8081
+          env:
+            - name: TZ
+              value: Europe/Copenhagen
+            - name: WEB_CONCURRENCY
+              value: {{ .Values.webConcurrency | quote }}
+            # uvicorn runs with --proxy-headers; only these peers may rewrite scheme and host
+            - name: FORWARDED_ALLOW_IPS
+              value: {{ required "forwardedAllowIps is required" .Values.forwardedAllowIps | quote }}
+            - name: POSTGRES_HOST_READER
+              value: {{ required "postgres.hostReader is required" .Values.postgres.hostReader | quote }}
+            - name: POSTGRES_HOST_WRITER
+              value: {{ required "postgres.hostWriter is required" .Values.postgres.hostWriter | quote }}
+            - name: POSTGRES_PORT
+              value: {{ .Values.postgres.port | quote }}
+            - name: POSTGRES_DBNAME
+              value: {{ required "postgres.dbname is required" .Values.postgres.dbname | quote }}
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "postgres.existingSecret is required" .Values.postgres.existingSecret }}
+                  key: {{ .Values.postgres.userKey }}
+            - name: POSTGRES_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.existingSecret }}
+                  key: {{ .Values.postgres.passwordKey }}
+            - name: STAC_SCHEMA
+              value: {{ .Values.stac.schema | quote }}
+            - name: STAC_ITEM_TABLE
+              value: {{ .Values.stac.itemTable | quote }}
+            {{- if .Values.auth.enabled }}
+            - name: OIDC_ENABLED
+              value: "true"
+            - name: OIDC_ISSUER
+              value: {{ required "auth.issuer is required when auth is enabled" .Values.auth.issuer | quote }}
+            - name: OIDC_AUDIENCE
+              value: {{ required "auth.audience is required when auth is enabled" .Values.auth.audience | quote }}
+            - name: OIDC_JWKS_URL
+              value: {{ required "auth.jwksUrl is required when auth is enabled" .Values.auth.jwksUrl | quote }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /_mgmt/ping
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /_mgmt/ping
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

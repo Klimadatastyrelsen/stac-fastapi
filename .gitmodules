@@ -1,4 +1,4 @@
 [submodule "stac-fastapi-sqlalchemy"]
 	path = stac-fastapi-sqlalchemy
-	url = https://github.com/SDFIdk/stac-fastapi-sqlalchemy
-	branch = test
+	url = https://github.com/Klimadatastyrelsen/stac-fastapi-sqlalchemy
+	branch = k8s/atlas

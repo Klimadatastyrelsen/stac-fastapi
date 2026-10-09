@@ -1,0 +1,76 @@
+replicaCount: 2
+
+image:
+  repository: ghcr.io/klimadatastyrelsen/stac-fastapi
+  # tag defaults to .Chart.AppVersion when empty - keeps chart and image in lockstep
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  tls: []
+
+# an existing secret holding the two keys below; the chart never creates it
+postgres:
+  existingSecret: ""
+  userKey: POSTGRES_USER
+  passwordKey: POSTGRES_PASS
+  hostReader: ""
+  hostWriter: ""
+  port: "5432"
+  dbname: ""
+
+# the api reads one schema; itemTable is a materialized view maintained outside this release
+stac:
+  schema: stac_api
+  itemTable: images_mvw
+
+# caller authentication (oidc bearer tokens), enforced on every route but /_mgmt/ping.
+# disabled -> the api is open. the jwks endpoint is fetched lazily, so a cold issuer
+# never blocks a rollout. tokens must be EdDSA-signed and carry exp, iat, iss, aud, sub.
+auth:
+  enabled: false
+  issuer: "" # required when enabled; the exact `iss` value, not a discovery url
+  audience: "" # required when enabled; value the api requires in `aud`
+  jwksUrl: "" # required when enabled
+
+# peers whose x-forwarded-* headers set the scheme and host in generated stac links.
+# "*" trusts every in-cluster pod, only safe behind a networkpolicy
+forwardedAllowIps: ""
+
+# uvicorn worker processes per pod
+webConcurrency: "4"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    memory: 1Gi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
