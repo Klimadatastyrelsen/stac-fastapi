@@ -72,6 +72,17 @@ spec:
               value: {{ required "auth.audience is required when auth is enabled" .Values.auth.audience | quote }}
             - name: OIDC_JWKS_URL
               value: {{ required "auth.jwksUrl is required when auth is enabled" .Values.auth.jwksUrl | quote }}
+            {{- with .Values.auth.introspection.url }}
+            - name: OIDC_INTROSPECTION_URL
+              value: {{ . | quote }}
+            - name: OIDC_INTROSPECTION_CLIENT_ID
+              value: {{ required "auth.introspection.clientId is required with introspection.url" $.Values.auth.introspection.clientId | quote }}
+            - name: OIDC_INTROSPECTION_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "auth.introspection.existingSecret is required with introspection.url" $.Values.auth.introspection.existingSecret }}
+                  key: {{ $.Values.auth.introspection.clientSecretKey }}
+            {{- end }}
             {{- end }}
           readinessProbe:
             httpGet:

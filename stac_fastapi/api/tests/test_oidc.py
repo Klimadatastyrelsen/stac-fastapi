@@ -1,6 +1,12 @@
+import base64
+import contextlib
+import io
+import json
 import time
+import urllib.error
 from datetime import datetime
 from types import SimpleNamespace
+from unittest import mock
 
 import jwt
 import pytest
@@ -327,3 +333,232 @@ def test_prefixed_health_route_is_public():
     with TestClient(app) as client:
         assert client.get("/stac/_mgmt/ping").status_code == 200
         assert client.get("/stac/collections").status_code == 401
+
+
+@pytest.fixture
+def introspecting_app(monkeypatch):
+    monkeypatch.setattr(oidc, "PUBLIC_USER_PRODUCTS", {"demo-product"})
+    monkeypatch.setattr(oidc, "DEFENCE_PRODUCT", "defence-product")
+    auth = OIDCTokenAuth(
+        "https://issuer.example",
+        "stac",
+        "https://issuer.example/jwks",
+        introspection_url="https://issuer.example/api/keys/introspect",
+        introspection_client_id="stac-api",
+        introspection_client_secret="s3cret",
+    )
+    calls = []
+
+    def introspect(token):
+        calls.append(token)
+        return reply()
+
+    monkeypatch.setattr(auth, "_introspect", introspect)
+    app = FastAPI()
+
+    @app.get("/data")
+    def data(request: Request):
+        return {
+            "sub": request.state.auth["sub"],
+            "products": sorted(request.scope["allowed_products"]),
+        }
+
+    auth.install(app)
+    return app, auth, calls
+
+
+def reply(**overrides):
+    now = int(time.time())
+    return {
+        "active": True,
+        "iss": "https://issuer.example",
+        "sub": "org:demo-org",
+        "aud": ["stac-api"],
+        "scope": "api:access",
+        "jti": "key-1",
+        "iat": now,
+        "exp": now + 3600,
+        **overrides,
+    }
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda client: client.get(
+            "/data", headers={"Authorization": "Bearer opaque-key"}
+        ),
+        lambda client: client.get("/data", headers={"token": "opaque-key"}),
+        lambda client: client.get("/data", params={"token": "opaque-key"}),
+    ],
+    ids=["authorization", "header", "query"],
+)
+def test_opaque_key_from_every_source(introspecting_app, call):
+    app, _, calls = introspecting_app
+    with TestClient(app) as client:
+        response = call(client)
+    assert response.status_code == 200
+    assert response.json() == {"sub": "org:demo-org", "products": ["demo-product"]}
+    assert calls == ["opaque-key"]
+
+
+def test_jwt_still_verifies_locally_when_introspection_is_configured(
+    introspecting_app, monkeypatch
+):
+    app, auth, calls = introspecting_app
+    private_key = Ed25519PrivateKey.generate()
+    monkeypatch.setattr(
+        auth.jwks,
+        "get_signing_key_from_jwt",
+        lambda token: SimpleNamespace(key=private_key.public_key()),
+    )
+    with TestClient(app) as client:
+        response = client.get("/data", params={"token": token(private_key)})
+    assert response.status_code == 200
+    assert response.json()["sub"] == "demo-user"
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"active": False},
+        {"iss": "https://wrong.example"},
+        {"aud": ["other-api"]},
+        {"aud": None},
+        {"scope": "openid profile"},
+        {"exp": int(time.time()) - 1},
+        {"sub": ""},
+    ],
+)
+def test_unusable_key_is_denied(introspecting_app, monkeypatch, overrides):
+    app, auth, _ = introspecting_app
+    monkeypatch.setattr(auth, "_introspect", lambda token: reply(**overrides))
+    with TestClient(app) as client:
+        response = client.get("/data", params={"token": "opaque-key"})
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+
+
+def test_a_single_audience_string_is_accepted(introspecting_app, monkeypatch):
+    app, auth, _ = introspecting_app
+    monkeypatch.setattr(auth, "_introspect", lambda token: reply(aud="stac-api"))
+    with TestClient(app) as client:
+        assert client.get("/data", params={"token": "opaque-key"}).status_code == 200
+
+
+def test_opaque_keys_need_a_configured_introspection_endpoint(monkeypatch):
+    monkeypatch.setattr(oidc, "PUBLIC_USER_PRODUCTS", {"demo-product"})
+    auth = OIDCTokenAuth("https://issuer.example", "stac", "https://issuer.example/jwks")
+    app = FastAPI()
+
+    @app.get("/data")
+    def data(request: Request):
+        return {"sub": request.state.auth["sub"]}
+
+    auth.install(app)
+    with TestClient(app) as client:
+        assert client.get("/data", params={"token": "opaque-key"}).status_code == 401
+
+
+def test_introspection_needs_client_credentials():
+    with pytest.raises(ValueError):
+        OIDCTokenAuth(
+            "https://issuer.example",
+            "stac",
+            "https://issuer.example/jwks",
+            introspection_url="https://issuer.example/api/keys/introspect",
+        )
+
+
+def test_decisions_are_cached_and_capped(introspecting_app):
+    app, auth, calls = introspecting_app
+    with TestClient(app) as client:
+        for _ in range(3):
+            assert client.get("/data", params={"token": "opaque-key"}).status_code == 200
+    assert len(calls) == 1
+    assert len(auth._decisions) == 1
+    expires_at, _ = next(iter(auth._decisions.values()))
+    assert expires_at <= time.monotonic() + oidc.DECISION_TTL
+
+
+def test_a_denial_is_cached_too(introspecting_app, monkeypatch):
+    app, auth, calls = introspecting_app
+
+    def introspect(token):
+        calls.append(token)
+        return {"active": False}
+
+    monkeypatch.setattr(auth, "_introspect", introspect)
+    with TestClient(app) as client:
+        for _ in range(3):
+            assert client.get("/data", params={"token": "opaque-key"}).status_code == 401
+    assert len(calls) == 1
+
+
+def test_a_decision_is_never_cached_past_the_keys_expiry(introspecting_app, monkeypatch):
+    app, auth, _ = introspecting_app
+    monkeypatch.setattr(
+        auth, "_introspect", lambda token: reply(exp=int(time.time()) + 5)
+    )
+    with TestClient(app) as client:
+        assert client.get("/data", params={"token": "opaque-key"}).status_code == 200
+    expires_at, _ = next(iter(auth._decisions.values()))
+    assert expires_at <= time.monotonic() + 5
+
+
+def test_the_oldest_decision_is_evicted(introspecting_app, monkeypatch):
+    app, auth, _ = introspecting_app
+    monkeypatch.setattr(oidc, "MAX_DECISIONS", 2)
+    with TestClient(app) as client:
+        for key in ["a", "b", "c"]:
+            assert client.get("/data", params={"token": key}).status_code == 200
+    assert len(auth._decisions) == 2
+
+
+@pytest.mark.parametrize(
+    "boom",
+    [
+        # built on demand: an HTTPError holds a file object, which pytest cannot name
+        lambda: urllib.error.HTTPError("url", 401, "invalid_client", {}, None),
+        lambda: urllib.error.URLError("connection refused"),
+        lambda: ValueError("not json"),
+    ],
+    ids=["refused", "unreachable", "unparseable"],
+)
+def test_introspection_failure_is_unavailable_and_uncached(
+    introspecting_app, monkeypatch, boom
+):
+    app, auth, calls = introspecting_app
+
+    def introspect(token):
+        calls.append(token)
+        raise boom()
+
+    monkeypatch.setattr(auth, "_introspect", introspect)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        for _ in range(2):
+            assert client.get("/data", params={"token": "opaque-key"}).status_code == 503
+    assert len(calls) == 2
+    assert auth._decisions == {}
+
+
+def test_the_introspection_request_is_a_basic_authenticated_form(introspecting_app):
+    _, auth, _ = introspecting_app
+    sent = {}
+    introspect = OIDCTokenAuth._introspect  # the fixture stubbed the bound one away
+
+    def urlopen(request, timeout=None):
+        sent["url"] = request.full_url
+        sent["headers"] = {k.lower(): v for k, v in request.headers.items()}
+        sent["body"] = request.data.decode()
+        return contextlib.closing(io.BytesIO(json.dumps(reply()).encode()))
+
+    with mock.patch.object(oidc.urllib.request, "urlopen", urlopen):
+        assert introspect(auth, "opaque-key")["active"] is True
+    assert sent["url"] == "https://issuer.example/api/keys/introspect"
+    assert sent["body"] == "token=opaque-key&token_type_hint=access_token"
+    assert sent["headers"]["authorization"] == "Basic " + base64.b64encode(
+        b"stac-api:s3cret"
+    ).decode()
+    assert sent["headers"]["content-type"] == "application/x-www-form-urlencoded"

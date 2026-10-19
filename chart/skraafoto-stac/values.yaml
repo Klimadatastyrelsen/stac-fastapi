@@ -42,6 +42,13 @@ auth:
   issuer: "" # required when enabled; the exact `iss` value, not a discovery url
   audience: "" # required when enabled; value the api requires in `aud`
   jwksUrl: "" # required when enabled
+  # opaque api keys from the `?token=` flow. without a url they are rejected and only jwts work.
+  # decisions are cached 30s and never past the key's exp, so a revoked key lingers that long
+  introspection:
+    url: "" # rfc 7662 endpoint; kds-auth answers api keys at /api/keys/introspect
+    clientId: "" # required with url; this api's oauth client, which a key must name in `aud`
+    existingSecret: "" # required with url; holds this api's oauth client secret
+    clientSecretKey: OIDC_INTROSPECTION_CLIENT_SECRET
 
 # peers whose x-forwarded-* headers set the scheme and host in generated stac links.
 # "*" trusts every in-cluster pod, only safe behind a networkpolicy
