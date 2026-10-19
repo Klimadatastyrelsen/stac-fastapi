@@ -81,7 +81,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ required "auth.introspection.existingSecret is required with introspection.url" $.Values.auth.introspection.existingSecret }}
-                  key: {{ $.Values.auth.introspection.clientSecretKey }}
+                  key: {{ $.Values.auth.introspection.existingSecretKey }}
             {{- end }}
             {{- end }}
           readinessProbe:
