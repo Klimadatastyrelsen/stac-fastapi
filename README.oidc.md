@@ -43,10 +43,9 @@ failures are not cached and answer 503. Without `introspection_url` the opaque
 path is closed and only JWTs are accepted.
 
 The dependency makes the claims, or the introspection reply, available through
-`request.state.auth`. Product access is derived from the `hiddenProductSlugs`
-claim: an absent or empty claim selects the standard profile, while the defence
-marker selects the defence profile. The claim lists every hidden product the
-holder reaches, so other slugs are ignored; a claim that is not a list of
-strings is rejected. `request.scope["allowed_products"]` contains the resulting
-product allowlist. An API key carries the claim only from kds-auth 3.8.0, and
-only an organisation key can hold a hidden product.
+`request.state.auth`, and puts the `hiddenProductSlugs` claim in
+`request.scope["allowed_products"]`. The claim lists every hidden product the
+holder reaches; a claim that is not a list of strings is rejected. Public data
+carries no product at all, so an absent or empty claim still reaches it. An API
+key carries the claim only from kds-auth 3.8.0, and only an organisation key
+can hold a hidden product.
