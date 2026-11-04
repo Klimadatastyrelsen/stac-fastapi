@@ -24,9 +24,6 @@ from stac_fastapi.api.routes import add_route_dependencies
 
 logger = logging.getLogger(__name__)
 bearer = HTTPBearer(auto_error=False)
-PUBLIC_USER_PRODUCTS = {"skraafoto_fri", "skraafoto_pix"}
-DEFENCE_USER_PRODUCTS = {"skraafoto_fri", "skraafoto_forsvar"}
-DEFENCE_PRODUCT = "skraafoto_forsvar"
 API_KEY_SCOPE = "api:access"
 UNAUTHORIZED = {"WWW-Authenticate": "Bearer"}
 TIMEOUT = 3  # secs, outbound deadline for both jwks and introspection
@@ -193,11 +190,7 @@ class OIDCTokenAuth:
         ):
             logger.warning("Invalid OIDC product entitlement claims")
             raise HTTPException(status_code=403, detail="invalid product entitlements")
-        return (
-            DEFENCE_USER_PRODUCTS
-            if DEFENCE_PRODUCT in products
-            else PUBLIC_USER_PRODUCTS
-        )
+        return set(products)
 
     def install(self, app: FastAPI) -> None:
         """Protect registered API routes after all extensions have registered."""

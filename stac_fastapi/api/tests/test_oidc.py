@@ -21,11 +21,6 @@ from test_api import TestRouteDependencies as RouteDependencies
 
 @pytest.fixture
 def authenticated_app(monkeypatch):
-    monkeypatch.setattr(oidc, "PUBLIC_USER_PRODUCTS", {"demo-product"})
-    monkeypatch.setattr(
-        oidc, "DEFENCE_USER_PRODUCTS", {"demo-product", "defence-product"}
-    )
-    monkeypatch.setattr(oidc, "DEFENCE_PRODUCT", "defence-product")
     private_key = Ed25519PrivateKey.generate()
     auth = OIDCTokenAuth("https://issuer.example", "stac", "https://issuer.example/jwks")
     monkeypatch.setattr(
@@ -59,7 +54,7 @@ def token(private_key, **overrides):
         "sub": "demo-user",
         "iat": now,
         "exp": now + 300,
-        "hiddenProductSlugs": ["defence-product"],
+        "hiddenProductSlugs": ["hidden-product"],
         **overrides,
     }
     return jwt.encode(claims, private_key, algorithm="EdDSA")
@@ -78,7 +73,7 @@ def test_missing_token_and_valid_token(authenticated_app, method):
         assert response.status_code == 200
         assert response.json() == {
             "sub": "demo-user",
-            "products": ["defence-product", "demo-product"],
+            "products": ["hidden-product"],
         }
     data_route = next(route for route in app.routes if route.path == "/data")
     assert len(data_route.dependencies) == 1
@@ -163,7 +158,6 @@ def test_disallowed_algorithm(authenticated_app):
 
 @pytest.mark.parametrize("algorithm", ["HS256", "EdDSA"])
 def test_configured_algorithm(monkeypatch, algorithm):
-    monkeypatch.setattr(oidc, "PUBLIC_USER_PRODUCTS", {"demo-product"})
     app = FastAPI()
     if algorithm == "EdDSA":
         signing_key = Ed25519PrivateKey.generate()
@@ -203,9 +197,7 @@ def test_configured_algorithm(monkeypatch, algorithm):
     with TestClient(app) as client:
         response = client.get("/data", headers={"Authorization": f"Bearer {encoded}"})
     assert response.status_code == 200
-    assert response.json() == {
-        "products": ["demo-product"],
-    }
+    assert response.json() == {"products": []}
     assert auth.algorithms == (algorithm,)
 
 
@@ -286,21 +278,20 @@ def test_late_routes_are_protected_on_reinstallation(authenticated_app):
 @pytest.mark.parametrize(
     "overrides,status,products",
     [
-        ({}, 200, ["demo-product"]),
-        ({"hiddenProductSlugs": []}, 200, ["demo-product"]),
+        ({}, 200, []),
+        ({"hiddenProductSlugs": []}, 200, []),
         (
-            {"hiddenProductSlugs": ["defence-product", "defence-product"]},
+            {"hiddenProductSlugs": ["hidden-product", "hidden-product"]},
             200,
-            ["defence-product", "demo-product"],
+            ["hidden-product"],
         ),
-        ({"hiddenProductSlugs": ["unknown"]}, 200, ["demo-product"]),
         (
-            {"hiddenProductSlugs": ["defence-product", "unknown"]},
+            {"hiddenProductSlugs": ["other-product", "hidden-product"]},
             200,
-            ["defence-product", "demo-product"],
+            ["hidden-product", "other-product"],
         ),
         ({"hiddenProductSlugs": None}, 403, None),
-        ({"hiddenProductSlugs": "defence-product"}, 403, None),
+        ({"hiddenProductSlugs": "hidden-product"}, 403, None),
         ({"hiddenProductSlugs": [123]}, 403, None),
     ],
 )
@@ -337,8 +328,6 @@ def test_prefixed_health_route_is_public():
 
 @pytest.fixture
 def introspecting_app(monkeypatch):
-    monkeypatch.setattr(oidc, "PUBLIC_USER_PRODUCTS", {"demo-product"})
-    monkeypatch.setattr(oidc, "DEFENCE_PRODUCT", "defence-product")
     auth = OIDCTokenAuth(
         "https://issuer.example",
         "stac",
@@ -398,7 +387,7 @@ def test_opaque_key_from_every_source(introspecting_app, call):
     with TestClient(app) as client:
         response = call(client)
     assert response.status_code == 200
-    assert response.json() == {"sub": "org:demo-org", "products": ["demo-product"]}
+    assert response.json() == {"sub": "org:demo-org", "products": []}
     assert calls == ["opaque-key"]
 
 
@@ -447,8 +436,7 @@ def test_a_single_audience_string_is_accepted(introspecting_app, monkeypatch):
         assert client.get("/data", params={"token": "opaque-key"}).status_code == 200
 
 
-def test_opaque_keys_need_a_configured_introspection_endpoint(monkeypatch):
-    monkeypatch.setattr(oidc, "PUBLIC_USER_PRODUCTS", {"demo-product"})
+def test_opaque_keys_need_a_configured_introspection_endpoint():
     auth = OIDCTokenAuth("https://issuer.example", "stac", "https://issuer.example/jwks")
     app = FastAPI()
 
