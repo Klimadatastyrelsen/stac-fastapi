@@ -70,3 +70,7 @@ To run the tests:
 ```shell
 pytest
 ```
+
+## Atlas
+
+The Atlas version runs on the `k8s` branch.
