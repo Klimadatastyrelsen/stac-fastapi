@@ -63,6 +63,10 @@ spec:
               value: {{ .Values.stac.schema | quote }}
             - name: STAC_ITEM_TABLE
               value: {{ .Values.stac.itemTable | quote }}
+            {{- with .Values.stac.countTable }}
+            - name: STAC_COUNT_TABLE
+              value: {{ . | quote }}
+            {{- end }}
             {{- if .Values.auth.enabled }}
             - name: OIDC_ENABLED
               value: "true"
