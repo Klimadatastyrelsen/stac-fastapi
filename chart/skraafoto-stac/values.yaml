@@ -29,10 +29,12 @@ postgres:
   port: "5432"
   dbname: ""
 
-# the api reads one schema; the dagster sync owns both tables, this release never creates them
+# the api reads one schema; the dagster sync owns these tables, this release never creates them
 stac:
   schema: skraafoto_stac
   itemTable: images
+  # per collection and product item counts; empty -> every unfiltered listing counts the item table. set once the sync has built it
+  countTable: ""
 
 # caller authentication (oidc bearer tokens), enforced on every route but /_mgmt/ping.
 # disabled -> the api is open. the jwks endpoint is fetched lazily, so a cold issuer
