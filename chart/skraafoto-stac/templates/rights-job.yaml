@@ -1,0 +1,67 @@
+{{- with .Values.auth.rights.url }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "skraafoto-stac.fullname" $ }}-rights
+  labels:
+    {{- include "skraafoto-stac.labels" $ | nindent 4 }}
+  annotations:
+    # argo runs these as a PostSync hook
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        # name without instance: the egress policy and kds-auth admit it, the service never selects it
+        app.kubernetes.io/name: {{ $.Chart.Name }}
+    spec:
+      restartPolicy: Never
+      {{- with $.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: declare-rights
+          image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag | default $.Chart.AppVersion }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml $.Values.containerSecurityContext | nindent 12 }}
+          env:
+            - name: RIGHTS_URL
+              value: {{ . | quote }}
+            - name: RIGHTS
+              value: {{ dict "rights" $.Values.auth.rights.items | toJson | quote }}
+            - name: CLIENT_ID
+              value: {{ required "auth.introspection.clientId is required with auth.rights.url" $.Values.auth.introspection.clientId | quote }}
+            - name: CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "auth.introspection.existingSecret is required with auth.rights.url" $.Values.auth.introspection.existingSecret }}
+                  key: {{ $.Values.auth.introspection.existingSecretKey }}
+          command:
+            - python
+            - -c
+            - |
+              import base64, os, sys, urllib.error, urllib.request
+              pair = (os.environ["CLIENT_ID"] + ":" + os.environ["CLIENT_SECRET"]).encode()
+              request = urllib.request.Request(
+                  os.environ["RIGHTS_URL"],
+                  data=os.environ["RIGHTS"].encode(),
+                  method="PUT",
+                  headers={
+                      "authorization": "Basic " + base64.b64encode(pair).decode(),
+                      "content-type": "application/json",
+                      "accept": "application/json",
+                  },
+              )
+              try:
+                  urllib.request.urlopen(request, timeout=10)
+              except urllib.error.HTTPError as error:
+                  sys.exit(f"{error.code} {error.read().decode()}")
+          resources:
+            {{- toYaml $.Values.auth.rights.resources | nindent 12 }}
+{{- end }}
