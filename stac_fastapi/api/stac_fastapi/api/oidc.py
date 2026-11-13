@@ -184,7 +184,7 @@ class OIDCTokenAuth:
         return body
 
     def _products(self, claims: dict) -> Set[str]:
-        products = claims.get("hiddenProductSlugs", [])
+        products = claims.get("rights", [])
         if not isinstance(products, list) or any(
             not isinstance(value, str) for value in products
         ):

@@ -54,7 +54,7 @@ def token(private_key, **overrides):
         "sub": "demo-user",
         "iat": now,
         "exp": now + 300,
-        "hiddenProductSlugs": ["hidden-product"],
+        "rights": ["hidden-product"],
         **overrides,
     }
     return jwt.encode(claims, private_key, algorithm="EdDSA")
@@ -189,7 +189,7 @@ def test_configured_algorithm(monkeypatch, algorithm):
             "sub": "demo-user",
             "iat": now,
             "exp": now + 300,
-            "hiddenProductSlugs": [],
+            "rights": [],
         },
         signing_key,
         algorithm=algorithm,
@@ -279,26 +279,26 @@ def test_late_routes_are_protected_on_reinstallation(authenticated_app):
     "overrides,status,products",
     [
         ({}, 200, []),
-        ({"hiddenProductSlugs": []}, 200, []),
+        ({"rights": []}, 200, []),
         (
-            {"hiddenProductSlugs": ["hidden-product", "hidden-product"]},
+            {"rights": ["hidden-product", "hidden-product"]},
             200,
             ["hidden-product"],
         ),
         (
-            {"hiddenProductSlugs": ["other-product", "hidden-product"]},
+            {"rights": ["other-product", "hidden-product"]},
             200,
             ["hidden-product", "other-product"],
         ),
-        ({"hiddenProductSlugs": None}, 403, None),
-        ({"hiddenProductSlugs": "hidden-product"}, 403, None),
-        ({"hiddenProductSlugs": [123]}, 403, None),
+        ({"rights": None}, 403, None),
+        ({"rights": "hidden-product"}, 403, None),
+        ({"rights": [123]}, 403, None),
     ],
 )
 def test_product_claim_validation(authenticated_app, overrides, status, products):
     app, _, key = authenticated_app
     claims = jwt.decode(token(key), options={"verify_signature": False})
-    del claims["hiddenProductSlugs"]
+    del claims["rights"]
     claims.update(overrides)
     encoded = jwt.encode(claims, key, algorithm="EdDSA")
     with TestClient(app) as client:
