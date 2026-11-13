@@ -43,9 +43,9 @@ failures are not cached and answer 503. Without `introspection_url` the opaque
 path is closed and only JWTs are accepted.
 
 The dependency makes the claims, or the introspection reply, available through
-`request.state.auth`, and puts the `rights` claim in
-`request.scope["allowed_products"]`. A row's product id must equal a right key
+`request.state.auth`, and puts the `entitlements` claim in
+`request.scope["allowed_products"]`. A row's product id must equal an entitlement key
 to be reached; a claim that is not a list of strings is rejected. Public data
 carries no product at all, so an absent or empty claim still reaches it. An API
 key carries the claim only from kds-auth 4.1.0, and only an organisation key
-can hold a right.
+can hold an entitlement.

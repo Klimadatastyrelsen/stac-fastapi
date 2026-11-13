@@ -1,8 +1,8 @@
-{{- with .Values.auth.rights.url }}
+{{- with .Values.auth.entitlements.url }}
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "skraafoto-stac.fullname" $ }}-rights
+  name: {{ include "skraafoto-stac.fullname" $ }}-entitlements
   labels:
     {{- include "skraafoto-stac.labels" $ | nindent 4 }}
   annotations:
@@ -25,22 +25,22 @@ spec:
       securityContext:
         {{- toYaml $.Values.podSecurityContext | nindent 8 }}
       containers:
-        - name: declare-rights
+        - name: declare-entitlements
           image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag | default $.Chart.AppVersion }}"
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
           securityContext:
             {{- toYaml $.Values.containerSecurityContext | nindent 12 }}
           env:
-            - name: RIGHTS_URL
+            - name: ENTITLEMENTS_URL
               value: {{ . | quote }}
-            - name: RIGHTS
-              value: {{ dict "rights" $.Values.auth.rights.items | toJson | quote }}
+            - name: ENTITLEMENTS
+              value: {{ dict "entitlements" $.Values.auth.entitlements.items | toJson | quote }}
             - name: CLIENT_ID
-              value: {{ required "auth.introspection.clientId is required with auth.rights.url" $.Values.auth.introspection.clientId | quote }}
+              value: {{ required "auth.introspection.clientId is required with auth.entitlements.url" $.Values.auth.introspection.clientId | quote }}
             - name: CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ required "auth.introspection.existingSecret is required with auth.rights.url" $.Values.auth.introspection.existingSecret }}
+                  name: {{ required "auth.introspection.existingSecret is required with auth.entitlements.url" $.Values.auth.introspection.existingSecret }}
                   key: {{ $.Values.auth.introspection.existingSecretKey }}
           command:
             - python
@@ -49,8 +49,8 @@ spec:
               import base64, os, sys, urllib.error, urllib.request
               pair = (os.environ["CLIENT_ID"] + ":" + os.environ["CLIENT_SECRET"]).encode()
               request = urllib.request.Request(
-                  os.environ["RIGHTS_URL"],
-                  data=os.environ["RIGHTS"].encode(),
+                  os.environ["ENTITLEMENTS_URL"],
+                  data=os.environ["ENTITLEMENTS"].encode(),
                   method="PUT",
                   headers={
                       "authorization": "Basic " + base64.b64encode(pair).decode(),
@@ -63,5 +63,5 @@ spec:
               except urllib.error.HTTPError as error:
                   sys.exit(f"{error.code} {error.read().decode()}")
           resources:
-            {{- toYaml $.Values.auth.rights.resources | nindent 12 }}
+            {{- toYaml $.Values.auth.entitlements.resources | nindent 12 }}
 {{- end }}
